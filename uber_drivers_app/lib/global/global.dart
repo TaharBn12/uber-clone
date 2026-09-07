@@ -6,7 +6,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 String userName = '';
 String userEmail = '';
-const String googleMapKey = "";
+// Injected at build time: flutter build apk --dart-define=GOOGLE_MAPS_API_KEY=...
+// (CI reads it from the GOOGLE_MAPS_API_KEY repository secret).
+const String googleMapKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
 const CameraPosition  googlePlexInitialPosition = CameraPosition(
   target: LatLng(37.42796133580664, -122.085749655962),
   zoom: 14.4746,

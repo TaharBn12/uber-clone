@@ -1,0 +1,282 @@
+name: Build APKs
+
+# Builds a release APK for each Flutter app (users, drivers, admin panel) and a
+# web bundle for the admin panel. APKs are attached to every run as artifacts
+# (Actions tab -> run -> "Artifacts") and to a GitHub Release when a `v*` tag
+# is pushed.
+#
+# Optional repository secrets (Settings -> Secrets and variables -> Actions):
+#   GOOGLE_MAPS_API_KEY        Google Maps / Places / Directions key (users + drivers apps)
+#   STRIPE_PUBLISHABLE_KEY     Stripe publishable key (users app)
+#   STRIPE_SECRET_KEY          Stripe secret key   (users app – test mode only, see docs)
+#   FCM_SERVICE_ACCOUNT_JSON   Firebase service-account JSON used by the users app to send
+#                              push notifications (content of the downloaded .json file)
+#   ANDROID_KEYSTORE_BASE64    base64 of your upload keystore (.jks)     ┐ release signing;
+#   ANDROID_KEYSTORE_PASSWORD  keystore password                        │ without them the
+#   ANDROID_KEY_ALIAS          key alias                                │ APK is signed with
+#   ANDROID_KEY_PASSWORD       key password                             ┘ a throw-away debug key
+#
+# Firebase itself is configured from the committed files
+# <app>/android/app/google-services.json and <app>/lib/firebase_options.dart
+# (regenerate them with tools/configure_firebase.py).
+
+on:
+  push:
+    branches:
+      - master
+      - "arena/**"
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-apks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.22.3" # matches .metadata / pubspec.lock (Dart 3.4.4)
+  JAVA_VERSION: "17"
+
+jobs:
+  android:
+    name: Android · ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [uber_users_app, uber_drivers_app, uber_admin_panel]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Set up Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Verify Firebase configuration
+        run: |
+          python3 - <<'EOF'
+          import json, re, sys
+          app_id = re.search(r'applicationId\s*=?\s*["\']([^"\']+)["\']',
+                             open("android/app/build.gradle").read()).group(1)
+          try:
+              gs = json.load(open("android/app/google-services.json"))
+          except FileNotFoundError:
+              sys.exit("android/app/google-services.json is missing – run tools/configure_firebase.py")
+          packages = [c["client_info"]["android_client_info"]["package_name"] for c in gs["client"]]
+          if app_id not in packages:
+              sys.exit(f"google-services.json has no Android app for '{app_id}' (found: {packages}). "
+                       "Register it in the Firebase console and re-run tools/configure_firebase.py")
+          try:
+              open("lib/firebase_options.dart")
+          except FileNotFoundError:
+              sys.exit("lib/firebase_options.dart is missing – run tools/configure_firebase.py")
+          print(f"OK: Firebase project '{gs['project_info']['project_id']}', package '{app_id}'")
+          EOF
+
+      - name: Install FCM service-account key (users app, optional)
+        if: matrix.app == 'uber_users_app'
+        env:
+          FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$FCM_SERVICE_ACCOUNT_JSON" ]; then
+            printf '%s' "$FCM_SERVICE_ACCOUNT_JSON" > assets/firebase/service_account.json
+            python3 -c "import json; d=json.load(open('assets/firebase/service_account.json')); assert d.get('type')=='service_account'; print('FCM key installed for project', d.get('project_id'))"
+          else
+            echo "FCM_SERVICE_ACCOUNT_JSON secret not set – the app will build, push notifications will be skipped at runtime."
+          fi
+
+      - name: Configure release signing (optional)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            : "${ANDROID_KEYSTORE_PASSWORD:?ANDROID_KEYSTORE_PASSWORD secret is required with ANDROID_KEYSTORE_BASE64}"
+            : "${ANDROID_KEY_ALIAS:?ANDROID_KEY_ALIAS secret is required with ANDROID_KEYSTORE_BASE64}"
+            : "${ANDROID_KEY_PASSWORD:?ANDROID_KEY_PASSWORD secret is required with ANDROID_KEYSTORE_BASE64}"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+            {
+              echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+              echo "keyPassword=$ANDROID_KEY_PASSWORD"
+              echo "keyAlias=$ANDROID_KEY_ALIAS"
+              echo "storeFile=upload-keystore.jks"
+            } > android/key.properties
+            echo "SIGNING=release keystore" >> "$GITHUB_ENV"
+            echo "Release keystore configured."
+          else
+            echo "SIGNING=debug key (uninstall the previous build before installing this one)" >> "$GITHUB_ENV"
+            echo "No ANDROID_KEYSTORE_BASE64 secret – signing with a debug key."
+          fi
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze (informational)
+        continue-on-error: true
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build release APK
+        id: build
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+        run: |
+          set -o pipefail
+          flutter build apk --release --verbose \
+            --build-number "${{ github.run_number }}" \
+            --dart-define "GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}" \
+            --dart-define "STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}" \
+            --dart-define "STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}" \
+            2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # If the build fails, surface the relevant error lines in the job summary
+      # (readable from the Checks API even when raw logs are not) and keep the
+      # full log as an artifact.
+      - name: Summarize build errors
+        if: failure() && steps.build.outcome == 'failure'
+        run: |
+          # Key lines as annotations (visible in the Checks API / PR "Files changed").
+          APP_NAME="${{ matrix.app }}" python3 - <<'EOF'
+          import os, re
+          app = os.environ["APP_NAME"]
+          log = open(os.environ["RUNNER_TEMP"] + "/build.log", errors="replace").read().splitlines()
+          pat = re.compile(r"(^e: |error:|Error:|FAILURE:|What went wrong|Exception|BUILD FAILED|Execution failed|Could not |Missing class|Duplicate class|Unresolved reference|R8:)")
+          noise = re.compile(r"(Skipping|Found plugin|-Werror|error_prone|\.pro:|errors\.dart|error_handler|ErrorWidget)")
+          hits = [l for l in log if pat.search(l) and not noise.search(l)]
+          text = "\n".join(hits[:80] + ["----- last 60 lines -----"] + log[-60:])
+          esc = lambda t: t.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          chunks = [text[i:i + 3500] for i in range(0, len(text), 3500)][:10] or ["(empty log)"]
+          for i, c in enumerate(chunks, 1):
+              print(f"::error title={app} build failed ({i}/{len(chunks)})::{esc(c)}")
+          EOF
+          {
+            echo "### :x: ${{ matrix.app }} – build failed"
+            echo ""
+            echo '```'
+            grep -nE "error:|Error:|FAILURE:|What went wrong|Exception|BUILD FAILED|Execution failed|Could not|not found|ERROR|Duplicate class|Unresolved|Type .* is not|Missing class|R8:" "$RUNNER_TEMP/build.log" \
+              | grep -vE "^\S+:\s*\[\s*\+?[0-9]+ ms\]" | head -80
+            echo "----- last 60 lines -----"
+            tail -n 60 "$RUNNER_TEMP/build.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        if: failure() && steps.build.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.app }}-build-log
+          path: ${{ runner.temp }}/build.log
+          retention-days: 7
+
+      - name: Collect APK
+        id: apk
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          out="$GITHUB_WORKSPACE/dist/${{ matrix.app }}-release.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$out"
+          size=$(du -h "$out" | cut -f1)
+          sha=$(sha256sum "$out" | cut -d' ' -f1)
+          {
+            echo "### ${{ matrix.app }}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| APK | \`${{ matrix.app }}-release.apk\` |"
+            echo "| Size | $size |"
+            echo "| Signing | $SIGNING |"
+            echo "| Build number | ${{ github.run_number }} |"
+            echo "| SHA-256 | \`$sha\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.app }}-apk
+          path: dist/${{ matrix.app }}-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  admin-web:
+    name: Web · uber_admin_panel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: uber_admin_panel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build web
+        run: flutter build web --release
+
+      - name: Upload web bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: uber_admin_panel-web
+          path: uber_admin_panel/build/web
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download APKs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: "*-apk"
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -la dist
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*.apk
+          generate_release_notes: true
+          fail_on_unmatched_files: true

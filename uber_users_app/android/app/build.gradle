@@ -26,6 +26,23 @@ if (flutterVersionName == null) {
     flutterVersionName = "1.0"
 }
 
+// Release signing. Create android/key.properties (git-ignored) with
+//   storePassword=..., keyPassword=..., keyAlias=..., storeFile=upload-keystore.jks
+// to sign with your own keystore; without it the debug key is used so
+// `flutter build apk --release` still works locally.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withReader("UTF-8") { reader ->
+        keystoreProperties.load(reader)
+    }
+}
+
+// Google Maps (Android Maps SDK) key: `maps.apiKey=...` in android/local.properties
+// or the GOOGLE_MAPS_API_KEY environment variable (used by CI). Injected into
+// AndroidManifest.xml through the ${MAPS_API_KEY} placeholder.
+def mapsApiKey = localProperties.getProperty("maps.apiKey") ?: System.getenv("GOOGLE_MAPS_API_KEY") ?: ""
+
 android {
     namespace = "com.example.uber_users_app"
     compileSdk = flutter.compileSdkVersion
@@ -45,13 +62,26 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
+        manifestPlaceholders.put("MAPS_API_KEY", mapsApiKey)
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+                storeFile = file(keystoreProperties["storeFile"])
+                storePassword = keystoreProperties["storePassword"]
+            }
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            // Uses android/key.properties when present, otherwise the debug key.
+            signingConfig = keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
+            // Stripe needs extra R8 rules, see proguard-rules.pro next to this file.
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }

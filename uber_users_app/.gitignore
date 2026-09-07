@@ -41,3 +41,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase service-account key used for FCM (never commit the real one;
+# keep the placeholder/example: see assets/firebase/README.md)
+/assets/firebase/service_account.json

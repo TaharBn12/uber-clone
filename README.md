@@ -9,6 +9,27 @@ This repository contains a ride-sharing platform similar to Uber, developed with
 ## Note
 - <span style="color:red">The project is missing some state management features, which can be added as a contribution.</span>
 
+## Setup & builds
+
+[![Build APKs](https://github.com/TaharBn12/uber-clone/actions/workflows/build-apks.yml/badge.svg)](https://github.com/TaharBn12/uber-clone/actions/workflows/build-apks.yml)
+
+- **Firebase:** point all three apps at your own Firebase project with one command
+  (copies `google-services.json` and generates `lib/firebase_options.dart` for each app):
+
+  ```bash
+  python3 tools/configure_firebase.py \
+    --google-services ~/Downloads/google-services.json \
+    --web-config ~/Downloads/firebase_web_config.txt   # optional (web build)
+  ```
+
+- **APKs:** every push builds release APKs for the users app, drivers app and admin panel
+  (plus a web bundle for the admin panel) via GitHub Actions – download them from the
+  run's **Artifacts**, or push a `v*` tag to publish a GitHub Release.
+- **Keys:** Google Maps / Stripe / FCM keys are injected at build time from repository
+  secrets (or `--dart-define` locally) – nothing secret needs to be committed.
+
+Full walkthrough (Arabic): [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md).
+
 4. ## Features
 
 ### **User App**
@@ -55,7 +76,7 @@ This repository contains a ride-sharing platform similar to Uber, developed with
   - Document uploads for driver verification (CNIC, Vehicle Registration, Driving License, etc.)
 - **Payment Gateway:** Flutter Stripe (`flutter_stripe`)
 - **UI/UX Enhancements:**  
-  - Loading animations (`loading_animation_widget`, `rounded_loading_button`)  
+  - Loading animations (`loading_animation_widget`)  
   - Shimmer effects for placeholders
 - **Miscellaneous:**  
   - Country picker for region selection (`country_picker`)  

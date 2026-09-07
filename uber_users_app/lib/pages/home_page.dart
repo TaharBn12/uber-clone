@@ -1658,14 +1658,26 @@ class _HomePageState extends State<HomePage> {
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           ClipOval(
-                            child: Image.network(
-                              photoDriver == ''
-                                  ? "https://firebasestorage.googleapis.com/v0/b/everyone-2de50.appspot.com/o/avatarman.png?alt=media&token=702d209c-9f99-46b2-832f-5bb986bc5eac"
-                                  : photoDriver,
-                              width: 60,
-                              height: 60,
-                              fit: BoxFit.cover,
-                            ),
+                            child: photoDriver == ''
+                                ? Image.asset(
+                                    "assets/images/avatarman.png",
+                                    width: 60,
+                                    height: 60,
+                                    fit: BoxFit.cover,
+                                  )
+                                : Image.network(
+                                    photoDriver,
+                                    width: 60,
+                                    height: 60,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) =>
+                                        Image.asset(
+                                      "assets/images/avatarman.png",
+                                      width: 60,
+                                      height: 60,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
                           ),
                           const SizedBox(
                             width: 8,

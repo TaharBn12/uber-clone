@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:googleapis_auth/auth_io.dart' as auth;
 import 'package:googleapis/servicecontrol/v1.dart' as servicecontrol;
@@ -9,47 +11,75 @@ import 'package:uber_users_app/appInfo/app_info.dart';
 import 'package:uber_users_app/global/global_var.dart';
 
 class PushNotificationService {
-  static Future<String> getAccessToken() async {
+  /// Location (inside the Flutter asset bundle) of the Firebase service-account
+  /// key used to call the FCM HTTP v1 API.
+  ///
+  /// The real key is **not** committed to git – copy your own key to
+  /// `assets/firebase/service_account.json` (see `assets/firebase/README.md`).
+  /// When the file is missing, notifications are skipped with a log message
+  /// instead of crashing the app.
+  static const String serviceAccountAssetPath =
+      'assets/firebase/service_account.json';
+
+  static const List<String> _scopes = [
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/firebase.database",
+    "https://www.googleapis.com/auth/firebase.messaging"
+  ];
+
+  static Map<String, dynamic>? _serviceAccountCache;
+
+  /// Loads and validates the service-account JSON from the asset bundle.
+  /// Returns `null` (after logging why) when it is missing or a placeholder.
+  static Future<Map<String, dynamic>?> loadServiceAccount() async {
+    if (_serviceAccountCache != null) return _serviceAccountCache;
+    String raw;
     try {
-      final serviceAccountJson = {
-        "type": "service_account",
-        "project_id": "everyone-2de50",
-        "private_key_id": "967652812eaa79d514ec736321a771749dde54d6",
-        "private_key":
-            "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCzCjNzkc73P7dY\nwZbhBTR4wBNFPHUGPeMGNVCUsednCpHV8jGKcCzXW4mKszQhALFzTLpfE/LTuxFl\nP5C8CEdaRCg1YVm/LiUVdC59nlvBX4ZVvWG8clVCnZWGacBwtnFft91uudKn+a5f\nodRQV7uS6nbhgxcrt0HhkoUl0PLWD4WwtazDbLwjCrLqqDO/vjMDS3mTjy6B73DD\nzGmZepxkjSb1YJbtNfs4DyxXG1Yyo/kQWcTiUxDeyFl9I1pkP4rVsdvUng40T323\n2JM98rGEp60hSAOshJavW9qK0KtHe+XSjNYoagCf2+3XxX3UoJpNg2qnUM/HMa9W\nHLJLLPwfAgMBAAECggEAB+SUERe6o+FuCp56MXsCba0AtyWA/otIO16qqet6iUCI\n3lbaLUFgZgbAi69Lxdqwd/tIH2c95hdR9ICMDRC2XeSG+0If6+gztVGVDRpSmYtF\nsk5HhUBrFs/jUXTPCYkEJX/xu0RmOjEtKUUf8CzLSvZFfbqYO71NTQ2htgw98Fwq\n50hfTuDa1+E12AU4iUYe6dYWbEo/FFSddQQA1XFnLVsY6Vu8bWDo4gVcj1RHXSVE\nkhyCp6z2u9yz6weozwI8vEgq2OuoFFYnbF3B0gnJk/ivULRkP74SzCF7njf9wATo\nTHdxXs3HmHLqat4cn58r8OXmrX+DA5VDMR/pe+MSFQKBgQDkrzHQQ8c2lRmLiECb\n0t8yZzYgfiRWp/0UQLyWA3x7hjDOQa1q+4W80mP98EzHhEDxQkUvyF9VCh1/mREU\n9N7QPPiIAwN12/+qGqvbmzdLSv841aNlI6SwHMAItwhLQDrtssPoR+yeRvtQsl+e\n1FAoNG2F19yGTiaNcFj2qr1GBQKBgQDIbPS9CSZlQFFRGQhOeHyh1W0834tMs8T7\n460lhcGz371GAoRzVhgvmx8K1qws8JRKoBJMok656VzaLi8kT4yVGXLjZf2Rp9/3\nitErfhViUX/gYEjuF30DCqz4+UD1AU2cokvQ5TeKlX+Oj1bxDmu+7cGIiQZHz3hB\nxsXC4XgO0wKBgFOpZGf04+SsF3RcnIZlVxJxf/PTMighvQyzwkp/bAMkzKYokPEa\no4q4zawRRYWYdMnOnNEmVPofgTs1HHK2Qu2b4LChqZpsqdPpfgYReuEoxsZcIjLW\nH2HuorKNg5NEJErho5pO9dnRzg9vslvBALI0u/zDRAI+hQwpleJoBGahAoGAHP0d\nXOYg5o4p9MfhGrB0nlenSCGxHTP3LtOcbIvvG1wmHSUqESCHuQL/t2qbVpipai3C\n19C2AE/PfUMm0GKtG7ellVxgE5wrWbt7S4YeA610CHkEs2M0UqdNo2kxyv4YQqp6\nuskcgm/jFjSHR7BlRyVOU7g171cDtsfQPMKtwb8CgYB8a8bQe3kwhWaXVl8CLqbx\nheg9/UxbVggT6FUEpaV2nJ/GsatjnlYPpGOGRFEptd3xaTssfIPUf7/4yu1kXwy8\nfY1PKckgRZNm7j0cbvRqCSW7lHySLrRIojzq1URf5VPQIfeTo6JcTULz4agvMScs\nT8eC2TBK+X8mrZ3EY2JjUw==\n-----END PRIVATE KEY-----\n",
-        "client_email":
-            "flutteruberclone-fahad@everyone-2de50.iam.gserviceaccount.com",
-        "client_id": "105514248289566554622",
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "auth_provider_x509_cert_url":
-            "https://www.googleapis.com/oauth2/v1/certs",
-        "client_x509_cert_url":
-            "https://www.googleapis.com/robot/v1/metadata/x509/flutteruberclone-fahad%40everyone-2de50.iam.gserviceaccount.com",
-        "universe_domain": "googleapis.com"
-      };
-      List<String> scopes = [
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/firebase.database",
-        "https://www.googleapis.com/auth/firebase.messaging"
-      ];
+      raw = await rootBundle.loadString(serviceAccountAssetPath);
+    } catch (e) {
+      debugPrint(
+          'FCM: $serviceAccountAssetPath not found in the app bundle ($e). '
+          'Push notifications are disabled – see assets/firebase/README.md.');
+      return null;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic> &&
+          decoded['type'] == 'service_account' &&
+          decoded['project_id'] is String &&
+          decoded['client_email'] is String &&
+          decoded['private_key'] is String &&
+          (decoded['private_key'] as String).contains('BEGIN PRIVATE KEY')) {
+        _serviceAccountCache = decoded;
+        return decoded;
+      }
+      debugPrint('FCM: $serviceAccountAssetPath is not a valid service-account '
+          'key (placeholder values?). Push notifications are disabled.');
+    } catch (e) {
+      debugPrint('FCM: could not parse $serviceAccountAssetPath: $e');
+    }
+    return null;
+  }
 
-      http.Client client = await auth.clientViaServiceAccount(
-        auth.ServiceAccountCredentials.fromJson(serviceAccountJson),
-        scopes,
-      );
-
-      auth.AccessCredentials credentials =
+  /// Returns an OAuth2 access token for the FCM v1 API, or `null` when no
+  /// service-account key is bundled with the app.
+  static Future<String?> getAccessToken() async {
+    final serviceAccountJson = await loadServiceAccount();
+    if (serviceAccountJson == null) return null;
+    final http.Client client = http.Client();
+    try {
+      final auth.AccessCredentials credentials =
           await auth.obtainAccessCredentialsViaServiceAccount(
         auth.ServiceAccountCredentials.fromJson(serviceAccountJson),
-        scopes,
+        _scopes,
         client,
       );
-      client.close();
       return credentials.accessToken.data;
     } catch (e) {
-      print("Failed to obtain access token: $e");
-      rethrow; // Optionally rethrow the exception
+      debugPrint("Failed to obtain access token: $e");
+      rethrow;
+    } finally {
+      client.close();
     }
   }
 
@@ -66,9 +96,22 @@ class PushNotificationService {
         .placeName
         .toString();
     print('pickup address is ${pickUpAddress}');
-    final String serverKeyTokenKey = await getAccessToken();
+    final String? serverKeyTokenKey = await getAccessToken();
+    if (serverKeyTokenKey == null) {
+      debugPrint('Push notification to driver skipped: no FCM service-account '
+          'key configured.');
+      return;
+    }
+    // Same Firebase project the app was initialised with (see firebase_options.dart).
+    final String firebaseProjectId = Firebase.app().options.projectId;
+    final String? keyProjectId =
+        (await loadServiceAccount())?['project_id'] as String?;
+    if (keyProjectId != null && keyProjectId != firebaseProjectId) {
+      debugPrint('FCM: service-account key belongs to project "$keyProjectId" '
+          'but the app uses project "$firebaseProjectId" – sending will fail.');
+    }
     String endpointFirebaseCloudMessaging =
-        "https://fcm.googleapis.com/v1/projects/everyone-2de50/messages:send";
+        "https://fcm.googleapis.com/v1/projects/$firebaseProjectId/messages:send";
     final Map<String, dynamic> message = {
       'message': {
         'token': deviceToken,
