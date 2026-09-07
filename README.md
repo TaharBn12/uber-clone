@@ -76,7 +76,7 @@ Full walkthrough (Arabic): [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md).
   - Document uploads for driver verification (CNIC, Vehicle Registration, Driving License, etc.)
 - **Payment Gateway:** Flutter Stripe (`flutter_stripe`)
 - **UI/UX Enhancements:**  
-  - Loading animations (`loading_animation_widget`, `rounded_loading_button`)  
+  - Loading animations (`loading_animation_widget`)  
   - Shimmer effects for placeholders
 - **Miscellaneous:**  
   - Country picker for region selection (`country_picker`)  

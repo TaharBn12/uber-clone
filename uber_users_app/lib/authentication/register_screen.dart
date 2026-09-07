@@ -1,7 +1,6 @@
 import 'package:country_picker/country_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:rounded_loading_button/rounded_loading_button.dart';
 import 'package:uber_users_app/appInfo/auth_provider.dart';
 import 'package:uber_users_app/authentication/user_information_screen.dart';
 import 'package:uber_users_app/methods/common_methods.dart';

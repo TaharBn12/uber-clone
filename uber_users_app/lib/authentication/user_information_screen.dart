@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:rounded_loading_button/rounded_loading_button.dart';
 import 'package:uber_users_app/appInfo/auth_provider.dart';
 import 'package:uber_users_app/methods/common_methods.dart';
 import 'package:uber_users_app/pages/home_page.dart';
