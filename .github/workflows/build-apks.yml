@@ -142,16 +142,44 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build release APK
+        id: build
         env:
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
         run: |
-          flutter build apk --release \
+          set -o pipefail
+          flutter build apk --release --verbose \
             --build-number "${{ github.run_number }}" \
             --dart-define "GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}" \
             --dart-define "STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}" \
-            --dart-define "STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}"
+            --dart-define "STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}" \
+            2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # If the build fails, surface the relevant error lines in the job summary
+      # (readable from the Checks API even when raw logs are not) and keep the
+      # full log as an artifact.
+      - name: Summarize build errors
+        if: failure() && steps.build.outcome == 'failure'
+        run: |
+          {
+            echo "### :x: ${{ matrix.app }} – build failed"
+            echo ""
+            echo '```'
+            grep -nE "error:|Error:|FAILURE:|What went wrong|Exception|BUILD FAILED|Execution failed|Could not|not found|ERROR|Duplicate class|Unresolved|Type .* is not|Missing class|R8:" "$RUNNER_TEMP/build.log" \
+              | grep -vE "^\S+:\s*\[\s*\+?[0-9]+ ms\]" | head -80
+            echo "----- last 60 lines -----"
+            tail -n 60 "$RUNNER_TEMP/build.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        if: failure() && steps.build.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.app }}-build-log
+          path: ${{ runner.temp }}/build.log
+          retention-days: 7
 
       - name: Collect APK
         id: apk
