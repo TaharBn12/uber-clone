@@ -194,3 +194,5 @@ storeFile=upload-keystore.jks   # نسبةً إلى android/app/
 | تسجيل الدخول بـ Google يفشل | أضف بصمة SHA-1 للتطبيق في Console ونزّل `google-services.json` من جديد |
 | الخريطة رمادية | مفتاح `GOOGLE_MAPS_API_KEY` مفقود أو غير مفعّل لـ Maps SDK for Android |
 | لا تصل الإشعارات للسائق | لم يُضبط مفتاح حساب الخدمة (`FCM_SERVICE_ACCOUNT_JSON`) أو أنه لمشروع آخر |
+| `Missing classes detected while running R8` في تطبيق المستخدمين | قواعد R8 الخاصة بـ Stripe موجودة في `uber_users_app/android/app/proguard-rules.pro`؛ إن أضفت مكتبة جديدة تحتاج قواعد، أضفها إلى نفس الملف (انظر `build/app/outputs/mapping/release/missing_rules.txt`) |
+| فشل البناء في GitHub Actions | افتح التشغيل → الوظيفة الفاشلة → قسم **Summary** يعرض أسطر الخطأ، وملف السجل الكامل مرفوع كـ artifact باسم `<app>-build-log` |

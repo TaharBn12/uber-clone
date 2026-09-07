@@ -162,6 +162,20 @@ jobs:
       - name: Summarize build errors
         if: failure() && steps.build.outcome == 'failure'
         run: |
+          # Key lines as annotations (visible in the Checks API / PR "Files changed").
+          APP_NAME="${{ matrix.app }}" python3 - <<'EOF'
+          import os, re
+          app = os.environ["APP_NAME"]
+          log = open(os.environ["RUNNER_TEMP"] + "/build.log", errors="replace").read().splitlines()
+          pat = re.compile(r"(^e: |error:|Error:|FAILURE:|What went wrong|Exception|BUILD FAILED|Execution failed|Could not |Missing class|Duplicate class|Unresolved reference|R8:)")
+          noise = re.compile(r"(Skipping|Found plugin|-Werror|error_prone|\.pro:|errors\.dart|error_handler|ErrorWidget)")
+          hits = [l for l in log if pat.search(l) and not noise.search(l)]
+          text = "\n".join(hits[:80] + ["----- last 60 lines -----"] + log[-60:])
+          esc = lambda t: t.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          chunks = [text[i:i + 3500] for i in range(0, len(text), 3500)][:10] or ["(empty log)"]
+          for i, c in enumerate(chunks, 1):
+              print(f"::error title={app} build failed ({i}/{len(chunks)})::{esc(c)}")
+          EOF
           {
             echo "### :x: ${{ matrix.app }} – build failed"
             echo ""

@@ -80,6 +80,8 @@ android {
         release {
             // Uses android/key.properties when present, otherwise the debug key.
             signingConfig = keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
+            // Stripe needs extra R8 rules, see proguard-rules.pro next to this file.
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }
